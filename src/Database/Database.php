@@ -1466,6 +1466,7 @@ class Database
      * @param mixed $default
      * @param bool $signed
      * @param bool $array
+     * @param bool $autoIncrement
      * @param string|null $format optional validation format of attribute
      * @param array<string, mixed> $formatOptions assoc array with custom options that can be passed for the format validation
      * @param array<string> $filters
@@ -1479,7 +1480,7 @@ class Database
      * @throws StructureException
      * @throws Exception
      */
-    public function createAttribute(string $collection, string $id, string $type, int $size, bool $required, mixed $default = null, bool $signed = true, bool $array = false, ?string $format = null, array $formatOptions = [], array $filters = []): bool
+    public function createAttribute(string $collection, string $id, string $type, int $size, bool $required, mixed $default = null, bool $signed = true, bool $array = false, bool $autoIncrement = false,?string $format = null, array $formatOptions = [], array $filters = []): bool
     {
         $collection = $this->silent(fn () => $this->getCollection($collection));
 

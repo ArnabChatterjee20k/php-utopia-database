@@ -361,17 +361,18 @@ class MariaDB extends SQL
      * @param int $size
      * @param bool $signed
      * @param bool $array
+     * @param bool $autoIncrement
      * @return bool
      * @throws Exception
      * @throws PDOException
      */
-    public function createAttribute(string $collection, string $id, string $type, int $size, bool $signed = true, bool $array = false): bool
+    public function createAttribute(string $collection, string $id, string $type, int $size, bool $signed = true, bool $array = false, bool $autoIncrement = false): bool
     {
         $name = $this->filter($collection);
         $id = $this->filter($id);
         $type = $this->getSQLType($type, $size, $signed, $array);
-
-        $sql = "ALTER TABLE {$this->getSQLTable($name)} ADD COLUMN `{$id}` {$type};";
+        $autoIncrementClause = ($type === Database::VAR_INTEGER && $autoIncrement) ? "NOT NULL AUTO_INCREMENT" :"";
+        $sql = "ALTER TABLE {$this->getSQLTable($name)} ADD COLUMN `{$id}` {$type} {$autoIncrementClause};";
         $sql = $this->trigger(Database::EVENT_ATTRIBUTE_CREATE, $sql);
 
         try {
