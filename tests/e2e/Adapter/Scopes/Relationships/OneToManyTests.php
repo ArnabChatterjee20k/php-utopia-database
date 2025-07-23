@@ -2072,4 +2072,60 @@ trait OneToManyTests
         $this->assertCount(0, $relation2->getAttribute('attributes'));
         $this->assertCount(0, $relation2->getAttribute('indexes'));
     }
+    public function testDeleteDocumentsRelationshipErrorDoesNotDeleteParent_OneToMany(): void
+    {
+        /** @var Database $database */
+        $database = static::getDatabase();
+
+        if (!$database->getAdapter()->getSupportForRelationships() || !$database->getAdapter()->getSupportForBatchOperations()) {
+            $this->expectNotToPerformAssertions();
+            return;
+        }
+
+        $database->createCollection('parent');
+        $database->createCollection('child');
+        $database->createAttribute('parent', 'name', Database::VAR_STRING, 255, true);
+        $database->createAttribute('child', 'name', Database::VAR_STRING, 255, true);
+
+        $database->createRelationship(
+            collection: 'parent',
+            relatedCollection: 'child',
+            type: Database::RELATION_ONE_TO_MANY,
+            onDelete: Database::RELATION_MUTATE_RESTRICT
+        );
+
+        $parent = $database->createDocument('parent', new Document([
+            '$id' => 'parent1',
+            '$permissions' => [
+                Permission::read(Role::any()),
+                Permission::update(Role::any()),
+                Permission::delete(Role::any()),
+            ],
+            'name' => 'Parent 1',
+            'child' => [
+                [
+                    '$id' => 'child1',
+                    '$permissions' => [
+                        Permission::read(Role::any()),
+                        Permission::update(Role::any()),
+                        Permission::delete(Role::any()),
+                    ],
+                    'name' => 'Child 1',
+                ]
+            ]
+        ]));
+
+        try {
+            $database->deleteDocuments('parent');
+            $this->fail('Expected exception was not thrown');
+        } catch (RestrictedException $e) {
+            $this->assertEquals('Cannot delete document because it has at least one related document.', $e->getMessage());
+        }
+        $parentDoc = $database->getDocument('parent', 'parent1');
+        $childDoc = $database->getDocument('child', 'child1');
+        $this->assertFalse($parentDoc->isEmpty(), 'Parent should not be deleted');
+        $this->assertFalse($childDoc->isEmpty(), 'Child should not be deleted');
+        $database->deleteCollection('parent');
+        $database->deleteCollection('child');
+    }
 }
