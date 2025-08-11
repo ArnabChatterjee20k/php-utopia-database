@@ -328,10 +328,11 @@ abstract class SQL extends Adapter
      * @param string $id
      * @param Query[] $queries
      * @param bool $forUpdate
+     * @param array<string> $spatialAttributes
      * @return Document
      * @throws DatabaseException
      */
-    public function getDocument(string $collection, string $id, array $queries = [], bool $forUpdate = false): Document
+    public function getDocument(string $collection, string $id, array $queries = [], bool $forUpdate = false, array $spatialAttributes = []): Document
     {
         $name = $this->filter($collection);
         $selections = $this->getAttributeSelections($queries);
@@ -341,7 +342,7 @@ abstract class SQL extends Adapter
         $alias = Query::DEFAULT_ALIAS;
 
         $sql = "
-		    SELECT {$this->getAttributeProjection($selections, $alias)}
+		    SELECT {$this->getAttributeProjection($selections, $alias, $spatialAttributes)}
             FROM {$this->getSQLTable($name)} AS {$this->quote($alias)}
             WHERE {$this->quote($alias)}.{$this->quote('_uid')} = :_uid 
             {$this->getTenantQuery($collection, $alias)}
@@ -394,7 +395,70 @@ abstract class SQL extends Adapter
             unset($document['_permissions']);
         }
 
+        // Process spatial attributes - convert from raw binary/WKT to arrays
+        if (!empty($spatialAttributes)) {
+            // For spatial attributes, we need to run another query using ST_AsText() 
+            // to get WKT format that we can convert to arrays
+            $spatialProjections = [];
+            foreach ($spatialAttributes as $spatialAttr) {
+                $filteredAttr = $this->filter($spatialAttr);
+                $quotedAttr = $this->quote($filteredAttr);
+                $spatialProjections[] = "ST_AsText({$quotedAttr}) AS {$quotedAttr}";
+            }
+            
+            if (!empty($spatialProjections)) {
+                $spatialSql = "
+                    SELECT " . implode(', ', $spatialProjections) . "
+                    FROM {$this->getSQLTable($name)} AS {$this->quote($alias)}
+                    WHERE {$this->quote($alias)}.{$this->quote('_uid')} = :_uid 
+                    {$this->getTenantQuery($collection, $alias)}
+                ";
+                
+                $spatialStmt = $this->getPDO()->prepare($spatialSql);
+                $spatialStmt->bindValue(':_uid', $id);
+                
+                if ($this->sharedTables) {
+                    $spatialStmt->bindValue(':_tenant', $this->getTenant());
+                }
+                
+                $spatialStmt->execute();
+                $spatialData = $spatialStmt->fetchAll();
+                $spatialStmt->closeCursor();
+                
+                if (!empty($spatialData)) {
+                    $spatialRow = $spatialData[0];
+                    // Replace the binary spatial data with WKT data
+                    foreach ($spatialAttributes as $spatialAttr) {
+                        if (array_key_exists($spatialAttr, $spatialRow)) {
+                            $document[$spatialAttr] = $spatialRow[$spatialAttr];
+                        }
+                    }
+                }
+            }
+            
+            // Now process spatial attributes to convert WKT to arrays
+            foreach ($spatialAttributes as $spatialAttr) {
+                if (array_key_exists($spatialAttr, $document) && !is_null($document[$spatialAttr])) {
+                    $document[$spatialAttr] = $this->processSpatialValue($document[$spatialAttr]);
+                }
+            }
+        }
+
         return new Document($document);
+    }
+
+    /**
+     * Process spatial value - convert from database format to array
+     * This method should be overridden by adapters that support spatial data
+     *
+     * @param mixed $value
+     * @return mixed
+     */
+    protected function processSpatialValue(mixed $value): mixed
+    {
+        // Default implementation - return as-is
+        // Concrete adapters (MariaDB, PostgreSQL) should override this
+        return $value;
     }
 
     /**
@@ -1074,6 +1138,19 @@ abstract class SQL extends Adapter
                      */
                     $total += 7;
                     break;
+
+                case Database::VAR_GEOMETRY:
+                case Database::VAR_POINT:
+                case Database::VAR_LINESTRING:
+                case Database::VAR_POLYGON:
+                    /**
+                     * Spatial types in MySQL/MariaDB and PostgreSQL
+                     * Store as binary data, size varies greatly
+                     * Estimate 50 bytes on average for simple geometries
+                     */
+                    $total += 50;
+                    break;
+
                 default:
                     throw new DatabaseException('Unknown type: ' . $attribute['type']);
             }
@@ -1426,6 +1503,11 @@ abstract class SQL extends Adapter
         return true;
     }
 
+    public function getSupportForSpatialAttributes(): bool
+    {
+        return false; // Default to false, subclasses override as needed
+    }
+
     /**
      * @param string $tableName
      * @param string $columns
@@ -1740,10 +1822,11 @@ abstract class SQL extends Adapter
      *
      * @param array<string> $selections
      * @param string $prefix
+     * @param array<string> $spatialAttributes
      * @return mixed
      * @throws Exception
      */
-    protected function getAttributeProjection(array $selections, string $prefix): mixed
+    protected function getAttributeProjection(array $selections, string $prefix, array $spatialAttributes = []): mixed
     {
         if (empty($selections) || \in_array('*', $selections)) {
             return "{$this->quote($prefix)}.*";

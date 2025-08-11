@@ -665,9 +665,10 @@ abstract class Adapter
      * @param string $id
      * @param array<Query> $queries
      * @param bool $forUpdate
+     * @param array<string> $spatialAttributes
      * @return Document
      */
-    abstract public function getDocument(string $collection, string $id, array $queries = [], bool $forUpdate = false): Document;
+    abstract public function getDocument(string $collection, string $id, array $queries = [], bool $forUpdate = false, array $spatialAttributes = []): Document;
 
     /**
      * Create Document
@@ -1028,6 +1029,13 @@ abstract class Adapter
      * @return bool
      */
     abstract public function getSupportForBatchCreateAttributes(): bool;
+
+    /**
+     * Is spatial attributes supported?
+     *
+     * @return bool
+     */
+    abstract public function getSupportForSpatialAttributes(): bool;
 
     /**
      * Get current attribute count from collection document
